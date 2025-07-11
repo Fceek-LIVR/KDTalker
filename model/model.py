@@ -146,7 +146,7 @@ class ConditionalPointCloudDiffusionModel(ModelMixin):
         # Whether to disable tqdm
         disable_tqdm: bool = False,
     ):
-
+        
         # Get scheduler from mapping, or use self.scheduler if None
         scheduler = self.scheduler if scheduler is None else self.schedulers_map[scheduler]
 
@@ -175,11 +175,9 @@ class ConditionalPointCloudDiffusionModel(ModelMixin):
         # Loop over timesteps
         all_outputs = []
         return_all_outputs = (return_sample_every_n_steps > 0)
-        progress_bar = tqdm(scheduler.timesteps.to(device), desc=f'Sampling ({x_t.shape})', disable=disable_tqdm)
 
         aud_feat = torch.cat([torch.zeros(B, 2, 512).cuda(), aud_feat], 1)
-
-        for i, t in enumerate(progress_bar):
+        for i, t in enumerate(scheduler.timesteps.to(device)):
             x_t_input = torch.cat([ori_kps.unsqueeze(1).detach(),ref_kps.unsqueeze(1).detach(), x_t], dim=1)
 
             # Forward
@@ -197,6 +195,7 @@ class ConditionalPointCloudDiffusionModel(ModelMixin):
         output = torch.stack([output,output,output],-1)
         if return_all_outputs:
             all_outputs = torch.stack(all_outputs, dim=1)  # (B, sample_steps, N, D)
+
         return (output, all_outputs) if return_all_outputs else output
 
     def forward(self, batch: dict, mode: str = 'train', **kwargs):

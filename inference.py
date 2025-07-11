@@ -133,7 +133,7 @@ class Inferencer(object):
 
         from model import get_model
         self.point_diffusion = get_model()
-        ckpt = torch.load('KDTalker.pth')
+        ckpt = torch.load('ckpts/KDTalker.pth')
 
         self.point_diffusion.load_state_dict(ckpt['model'])
         self.point_diffusion.eval()
@@ -221,6 +221,9 @@ class Inferencer(object):
 
     @torch.no_grad()
     def generate_with_audio_img(self, image_path, audio_path, save_path):
+        print(torch.cuda.is_available())
+        print(torch.cuda.get_device_capability(torch.cuda.current_device()))
+        # Load the Image into a np.array
         image = np.array(Image.open(image_path).convert('RGB'))
         cropped_image, crop, quad = self.croper.crop([image], still=False, xsize=512)
         input_image = cv2.resize(cropped_image[0], (256, 256))
@@ -247,6 +250,9 @@ class Inferencer(object):
         input_x = np.expand_dims(input_x, 0)
         input_x = np.concatenate([input_x, input_x, input_x], -1)
 
+
+        # Until this point can be pre-processed and cached in advance
+
         aud_feat = self.extract_wav2lip_from_audio(audio_path)
 
         sample_frame = 64
@@ -259,10 +265,12 @@ class Inferencer(object):
 
         outputs = [input_x]
 
+        # The audio has been sampled and sent through a point_diffusion process..?
         sample_frame = 64
         for i in range(0, aud_feat.shape[0] - 1, sample_frame):
             input_mel = torch.Tensor(aud_feat[i: i + sample_frame]).unsqueeze(0).cuda()
             kp0 = torch.Tensor(outputs[-1])[:, -1].cuda()
+            print(f"kp0 shape: {kp0.shape}, ori_kp shape: {ori_kp.shape}, input_mel shape: {input_mel.shape}")
             pred_kp = self.point_diffusion.forward_sample(70, ref_kps=kp0, ori_kps=ori_kp, aud_feat=input_mel,
                                                           scheduler='ddim', num_inference_steps=50)
             outputs.append(pred_kp.cpu().numpy())
@@ -284,6 +292,7 @@ class Inferencer(object):
             state_means, _ = kf.smooth(sequence)
             return state_means
 
+        # The smooth process is moved to CPU
         yaw_data = x_d_info['yaw'].cpu().numpy()
         pitch_data = x_d_info['pitch'].cpu().numpy()
         roll_data = x_d_info['roll'].cpu().numpy()
@@ -319,6 +328,7 @@ class Inferencer(object):
         I_p_lst = []
         R_d_0, x_d_0_info = None, None
 
+        animation_start_time = time.perf_counter()
         for i in track(range(num_frame), description='🚀Animating...', total=num_frame):
             x_d_i_info = template_dct['motion'][i]
             for key in x_d_i_info:
@@ -347,6 +357,10 @@ class Inferencer(object):
             I_p_i = self.live_portrait_pipeline.live_portrait_wrapper.parse_output(out['out'])[0]
             I_p_lst.append(I_p_i)
 
+        animation_end_time = time.perf_counter()
+        total_time = animation_end_time - animation_start_time
+        print("Time for animating 200 frames", total_time)
+
         video_name = save_path.split('/')[-1]
         video_save_dir = os.path.dirname(save_path)
         path = os.path.join(video_save_dir, 'temp_' + video_name)
@@ -362,7 +376,7 @@ class Inferencer(object):
         word = word1[start_time:end_time]
         word.export(new_audio_path, format="wav")
 
-        save_video_with_watermark(path, new_audio_path, save_path, watermark=False)
+        save_video_with_watermark(path, new_audio_path, save_path)
         print(f'The generated video is named {video_save_dir}/{video_name}')
 
         os.remove(path)
@@ -373,7 +387,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("-source_image", type=str, default="example/source_image/WDA_BenCardin1_000.png",
                         help="source image")
-    parser.add_argument("-driven_audio", type=str, default="example/driven_audio/WDA_BenCardin1_000.wav",
+    parser.add_argument("-driven_audio", type=str, default="example/audio_driven/WDA_BenCardin1_000.wav",
                         help="driving audio")
     parser.add_argument("-output", type=str, default="results/output.mp4", help="output video file name", )
 
